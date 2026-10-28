@@ -29,7 +29,7 @@ Raise/Lower costs 3 mana, or 5 when raising from sea. Rally gathers settlers. Ea
 
 A fresh visit generates a random island. Open the **Island seed** label to enter a 1–8 character hexadecimal seed or choose **New island**. Restart replays the current seed from its original state. A `?seed=474F44` URL also recreates a specific island.
 
-The current match and guide preference are stored locally in the browser. Reload resumes the island deterministically; starting another island clears the previous saved match. If storage is unavailable, the game remains playable without persistence.
+The current match and guide preference are stored locally in the browser. Reload resumes the island deterministically from a checkpoint, including matches longer than one hour; older replay saves are upgraded on the next save. Starting another island clears the previous saved match. If storage is unavailable, the game remains playable without persistence.
 
 ## Verify
 

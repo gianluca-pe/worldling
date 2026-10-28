@@ -1,4 +1,6 @@
 import { advanceHazards, createHazard, HAZARD_RULES } from "./hazards";
+import { validateCheckpoint } from "./checkpoint";
+import type { SimulationCheckpoint } from "./checkpoint";
 import type { Hazard, HazardType } from "./hazards";
 import { OpponentController } from "./opponent";
 import type { OpponentSnapshot } from "./opponent";
@@ -6,9 +8,8 @@ import { SeededRandom } from "./random";
 import type { Faction, GameMode, Replay, SimulationCommand } from "./replay";
 import { validateReplay } from "./replay";
 import {
-  TERRAIN_EDIT_MANA_COST,
   createSettlement,
-  isSuitableBuildingSite,
+  foundationRepair,
   setRallyBanner,
   terrainEditManaCost,
   updateSettlement,
@@ -78,10 +79,10 @@ function canRecoverSettlement(
 ): boolean {
   if (settlement.followers.length > 0) return true;
   if (settlement.houses.length === 0) return false;
-  if (settlement.mana >= TERRAIN_EDIT_MANA_COST) return true;
-  return settlement.houses.some((house) =>
-    isSuitableBuildingSite(terrain, house.x, house.y),
-  );
+  return settlement.houses.some((house) => {
+    const repair = foundationRepair(terrain, house);
+    return repair !== null && repair.cost <= settlement.mana;
+  });
 }
 
 export function matchStatusFor(
@@ -101,13 +102,13 @@ export class Simulation {
   readonly seed: number;
   private readonly mode: GameMode;
   private tick = 0;
-  private readonly random: SeededRandom;
-  private readonly settlementRandom: SeededRandom;
-  private readonly opponentSettlementRandom: SeededRandom | null = null;
+  private random: SeededRandom;
+  private settlementRandom: SeededRandom;
+  private opponentSettlementRandom: SeededRandom | null = null;
   private readonly terrain: TerrainState;
   private readonly settlement: SettlementState;
   private readonly opponent: SettlementState | null = null;
-  private readonly opponentController: OpponentController | null = null;
+  private opponentController: OpponentController | null = null;
   private readonly startAreas: Record<Faction, StartArea> | null = null;
   private readonly commands: SimulationCommand[] = [];
   private readonly hazards: Hazard[] = [];
@@ -155,6 +156,10 @@ export class Simulation {
     return this.matchStatus;
   }
 
+  get nextCommandSequence(): number {
+    return (this.commands.at(-1)?.sequence ?? -1) + 1;
+  }
+
   queue(command: SimulationCommand): void {
     const previous = this.commands.at(-1);
     if (
@@ -199,6 +204,65 @@ export class Simulation {
     );
     for (const command of validated.commands) simulation.queue(command);
     simulation.advanceTo(validated.ticks);
+    return simulation;
+  }
+
+  toCheckpoint(): SimulationCheckpoint {
+    return {
+      version: 1,
+      snapshot: this.snapshot(),
+      settlementRandomState: this.settlementRandom.snapshot(),
+      opponentSettlementRandomState:
+        this.opponentSettlementRandom?.snapshot() ?? null,
+      nextHazardId: this.nextHazardId,
+      nextOpponentSequence: this.nextOpponentSequence,
+      commands: this.commands.map((command) => ({ ...command })),
+    };
+  }
+
+  static fromCheckpoint(value: unknown): Simulation {
+    const checkpoint = validateCheckpoint(value);
+    const state = checkpoint.snapshot;
+    const simulation = new Simulation(state.seed, state.mode);
+    simulation.tick = state.tick;
+    simulation.random = new SeededRandom(state.randomState);
+    simulation.settlementRandom = new SeededRandom(
+      checkpoint.settlementRandomState,
+    );
+    simulation.terrain.heights.set(state.terrain.heights);
+    simulation.terrain.flooded!.set(state.terrain.flooded!);
+    Object.assign(simulation.settlement, state.settlement);
+    if (simulation.opponent && state.opponent && state.opponentAI) {
+      Object.assign(simulation.opponent, state.opponent);
+      Object.assign(simulation.startAreas!, state.startAreas);
+      simulation.opponentSettlementRandom = new SeededRandom(
+        checkpoint.opponentSettlementRandomState!,
+      );
+      simulation.opponentController = OpponentController.fromSnapshot(
+        state.opponentAI,
+      );
+    }
+    // Avoid spreading an arbitrarily long command history into a function call.
+    for (const command of checkpoint.commands)
+      simulation.commands.push(command);
+    simulation.pendingIndex = checkpoint.commands.findIndex(
+      (command) => command.tick >= state.tick,
+    );
+    if (simulation.pendingIndex < 0)
+      simulation.pendingIndex = checkpoint.commands.length;
+    for (const hazard of state.hazards) simulation.hazards.push(hazard);
+    simulation.probeCount = state.probeCount;
+    simulation.lastProbeValue = state.lastProbeValue;
+    simulation.lastSequence = state.lastSequence;
+    simulation.editCount = state.editCount;
+    simulation.rejectedEditCount = state.rejectedEditCount;
+    simulation.spellCount = state.spellCount;
+    simulation.nextHazardId = checkpoint.nextHazardId;
+    simulation.nextOpponentSequence = checkpoint.nextOpponentSequence;
+    simulation.matchStatus = state.matchStatus;
+    simulation.lastTerrainEdit = state.lastTerrainEdit;
+    simulation.lastRejectedEdit = state.lastRejectedEdit;
+    simulation.lastOpponentAction = state.lastOpponentAction;
     return simulation;
   }
 

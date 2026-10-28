@@ -2,6 +2,7 @@ import { HAZARD_RULES } from "./hazards";
 import { SeededRandom } from "./random";
 import type { Faction, SimulationCommand } from "./replay";
 import {
+  foundationRepair,
   isSuitableBuildingSite,
   TERRAIN_EDIT_MANA_COST,
   terrainEditManaCost,
@@ -25,6 +26,15 @@ export class OpponentController {
 
   constructor(private readonly random: SeededRandom) {}
 
+  static fromSnapshot(snapshot: OpponentSnapshot): OpponentController {
+    const controller = new OpponentController(
+      new SeededRandom(snapshot.randomState),
+    );
+    controller.nextDecisionTick = snapshot.nextDecisionTick;
+    controller.nextSpellTick = snapshot.nextSpellTick;
+    return controller;
+  }
+
   snapshot(): OpponentSnapshot {
     return {
       nextDecisionTick: this.nextDecisionTick,
@@ -44,7 +54,14 @@ export class OpponentController {
     this.nextDecisionTick = tick + 20;
 
     if (own.followers.length === 0) {
-      return this.repairFoundation(terrain, faction, own);
+      const repair = own.houses
+        .map((house) => foundationRepair(terrain, house))
+        .filter((plan) => plan !== null)
+        .filter((plan) => plan.cost <= own.mana)
+        .sort((first, second) => first.cost - second.cost)[0];
+      return repair?.nextEdit
+        ? { ...repair.nextEdit, faction, tick: 0, sequence: 0 }
+        : null;
     }
 
     if (!isSuitableBuildingSite(terrain, own.banner.x, own.banner.y)) {

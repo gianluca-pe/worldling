@@ -41,7 +41,7 @@ export interface Replay {
 }
 
 function isUnsignedInteger(value: unknown): value is number {
-  return Number.isInteger(value) && (value as number) >= 0;
+  return Number.isSafeInteger(value) && (value as number) >= 0;
 }
 
 function isValidAction(command: SimulationCommand): boolean {

@@ -29,11 +29,10 @@ try {
 const requestedSeed = parseSeed(
   new URLSearchParams(window.location.search).get("seed"),
 );
-const restoredReplay =
+const restoredSession =
   requestedSeed === null ? loadSession(sessionStorage) : null;
-let simulation = restoredReplay
-  ? Simulation.fromReplay(restoredReplay)
-  : new Simulation(requestedSeed ?? randomSeed(), "skirmish");
+let simulation =
+  restoredSession ?? new Simulation(requestedSeed ?? randomSeed(), "skirmish");
 const app = document.querySelector<HTMLDivElement>("#app");
 if (!app) throw new Error("Application root is missing");
 
@@ -124,7 +123,7 @@ const toolButtons = [
   ...document.querySelectorAll<HTMLButtonElement>("[data-tool]"),
 ];
 let selectedTool: Tool = "inspect";
-let sequence = (restoredReplay?.commands.at(-1)?.sequence ?? -1) + 1;
+let sequence = simulation.nextCommandSequence;
 let renderedSequence: number | null = null;
 let savedSequence: number | null = null;
 let lastSavedTick = simulation.snapshot().tick;
@@ -132,7 +131,7 @@ let paused = false;
 
 function persistSession(): void {
   lastSavedTick = simulation.snapshot().tick;
-  saveSession(sessionStorage, simulation.toReplay());
+  saveSession(sessionStorage, simulation);
 }
 
 const renderer = new TerrainRenderer(canvas, () => {
@@ -362,7 +361,12 @@ function frame(time: number): void {
       persistSession();
       savedSequence = snapshot.lastSequence;
     }
-    if (advanced && snapshot.tick % 2 === 0) renderer.invalidate();
+    if (
+      advanced &&
+      (snapshot.tick % 2 === 0 || snapshot.matchStatus !== "playing")
+    ) {
+      renderer.invalidate();
+    }
   }
   if (renderer.needsRender) drawWorld(snapshot ?? simulation.snapshot(), time);
   requestAnimationFrame(frame);
@@ -445,7 +449,7 @@ window.addEventListener("pageshow", resetTransientState);
 const initialSnapshot = simulation.snapshot();
 renderer.resetView(initialSnapshot.settlement.banner);
 updateInterface(initialSnapshot);
-if (restoredReplay) {
+if (restoredSession) {
   status.textContent = `Island restored · ${initialSnapshot.tick / 20}s elapsed`;
 }
 drawWorld(initialSnapshot);

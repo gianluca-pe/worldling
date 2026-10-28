@@ -1,5 +1,5 @@
 import type { SeededRandom } from "./random";
-import { isTerrainAboveWater } from "./terrain";
+import { isTerrainAboveWater, MAX_HEIGHT } from "./terrain";
 import type { TerrainState } from "./terrain";
 
 export const TERRAIN_EDIT_MANA_COST = 3;
@@ -193,6 +193,54 @@ export function isSuitableBuildingSite(
 
 export function houseCapacity(house: House): number {
   return house.level * 4;
+}
+
+export interface FoundationRepair {
+  readonly cost: number;
+  readonly nextEdit: (Point & { type: "raise-land" | "lower-land" }) | null;
+}
+
+// Consider every habitable elevation: lowering the house can be cheaper
+// than raising all eight neighboring tiles to its current height.
+export function foundationRepair(
+  terrain: TerrainState,
+  house: Point,
+): FoundationRepair | null {
+  if (
+    !isAboveWater(terrain, house.x, house.y) ||
+    !isInBounds(terrain, house.x - 1, house.y - 1) ||
+    !isInBounds(terrain, house.x + 1, house.y + 1)
+  ) {
+    return null;
+  }
+  let best: FoundationRepair | null = null;
+  for (let target = terrain.waterLevel + 1; target <= MAX_HEIGHT; target++) {
+    let cost = 0;
+    let nextEdit: FoundationRepair["nextEdit"] = null;
+    for (let y = house.y - 1; y <= house.y + 1; y++) {
+      for (let x = house.x - 1; x <= house.x + 1; x++) {
+        const height = terrain.heights[y * terrain.size + x]!;
+        if (height === target) continue;
+        nextEdit ??= {
+          x,
+          y,
+          type: height < target ? "raise-land" : "lower-land",
+        };
+        if (height > target) {
+          cost += (height - target) * TERRAIN_EDIT_MANA_COST;
+        } else {
+          for (let level = height; level < target; level++) {
+            cost +=
+              level <= terrain.waterLevel
+                ? SEA_RAISE_MANA_COST
+                : TERRAIN_EDIT_MANA_COST;
+          }
+        }
+      }
+    }
+    if (!best || cost < best.cost) best = { cost, nextEdit };
+  }
+  return best;
 }
 
 function findPath(terrain: TerrainState, start: Point, goal: Point): Point[] {
